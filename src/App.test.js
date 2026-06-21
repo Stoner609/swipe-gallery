@@ -1,9 +1,17 @@
 import React from 'react';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import App from './App';
 
-test('renders learn react link', () => {
-  const { getByText } = render(<App />);
-  const linkElement = getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+test('renders the carousel demo', () => {
+  const { getByRole } = render(<App />);
+  expect(getByRole('heading', { name: /demo/i })).toBeInTheDocument();
+});
+
+test('selects a card when clicked', () => {
+  const { getByRole } = render(<App />);
+  const card = getByRole('button', { name: /city at blue hour/i });
+
+  fireEvent.click(card);
+
+  expect(card).toHaveAttribute('aria-pressed', 'true');
 });

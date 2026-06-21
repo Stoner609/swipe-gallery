@@ -1,289 +1,303 @@
-import React from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 
-function VideoElement(props) {
-	const [rgbaColor, setgbaColor] = React.useState(() => {
-		const r = Math.floor(Math.random() * 255);
-		const g = Math.floor(Math.random() * 255);
-		const b = Math.floor(Math.random() * 255);
-		return `rgba(${r},${g},${b},0.8)`;
-	});
+const showcaseSwipeTransitionSeconds = 0.6;
+const dragStartThreshold = 8;
+const flingVelocityThreshold = 0.45;
+const itemAmount = 5;
+const itemWidth = 320;
+const showcaseItemGap = 12;
+const showcaseContainerGap = 12;
+const itemStep = itemWidth + showcaseItemGap;
+const clamp = (value, minimum, maximum) =>
+	Math.min(Math.max(value, minimum), maximum);
+const listingWidth =
+	itemAmount * itemWidth +
+	(itemAmount - 1) * showcaseItemGap +
+	showcaseContainerGap * 2;
+const initialVideos = [
+	{ name: "Mountain sunrise", image: "/images/mountain.jpg" },
+	{ name: "City at blue hour", image: "/images/city.jpg" },
+	{ name: "Forest waterfall", image: "/images/forest.jpg" },
+	{ name: "Ocean wave", image: "/images/ocean.jpg" },
+	{ name: "Desert expedition", image: "/images/desert.jpg" },
+];
 
+function VideoElement({ isSelected, onSelect, value }) {
 	return (
-		<div
-			onMouseDown={(event) => {
-				event.preventDefault();
-			}}
-			onClick={props.click}
-			style={{
-				backgroundColor: `${rgbaColor}`,
-				margin: "0px 6px",
-				width: "320px",
-				height: "200px",
-			}}
+		<VideoCard
+			aria-pressed={isSelected}
+			onClick={() => onSelect(value.name)}
+			selected={isSelected}
+			type="button"
 		>
-			{props.value.name}
-		</div>
+			<CardImage
+				alt={value.name}
+				draggable="false"
+				height="200"
+				src={value.image}
+				width="320"
+			/>
+		</VideoCard>
 	);
 }
 
-function Swipeable(props) {
-	const { onSwipeStart, onSwiping, onSwipeEnd } = props;
-	const setRef = React.useRef();
-	const startX = React.useRef(0);
-	const endX = React.useRef(0);
-	const startTime = React.useRef(0);
-	const isStarted = React.useRef(false);
-	const isDragging = React.useRef(false);
+function Swipeable({ children, onSwipeStart, onSwiping, onSwipeEnd }) {
+	const callbacksRef = useRef({ onSwipeStart, onSwiping, onSwipeEnd });
+	const pointerId = useRef(null);
+	const startX = useRef(0);
+	const startY = useRef(0);
+	const endX = useRef(0);
+	const startTime = useRef(0);
+	const isDragging = useRef(false);
+	const gestureAxis = useRef(null);
+	const suppressClick = useRef(false);
 
-	const _onSwipeStart = React.useRef(onSwipeStart);
-	const _onSwiping = React.useRef(onSwiping);
-	const _onSwipeEnd = React.useRef(onSwipeEnd);
+	callbacksRef.current = { onSwipeStart, onSwiping, onSwipeEnd };
 
-	const getVelocity = ({ deltaX = 0, deltaY = 0, deltaTime = 0 }) => ({
-		velocityX: Math.abs(deltaX) / deltaTime,
-		velocityY: Math.abs(deltaY) / deltaTime,
-	});
-
-	const getDirection = ({ deltaX = 0, deltaY = 0 }) => {
-		const isHorizontalSwipe = Math.abs(deltaX) >= Math.abs(deltaY);
-
-		if (isHorizontalSwipe) {
-			const isSwipeLeft = deltaX < 0;
-			return isSwipeLeft ? "DIRECTION_LEFT" : "DIRECTION_RIGHT";
-		}
-
-		const isSwipeDown = deltaY < 0;
-		return isSwipeDown ? "DIRECTION_DOWN" : "DIRECTION_UP";
-	};
-
-	const start = ({ x }) => {
-		startX.current = x;
-		endX.current = x;
-		isStarted.current = true;
-	};
-
-	const move = React.useCallback(({ x: endXX }) => {
-		if (!isStarted.current) return;
-
-		const deltaX = endXX - startX.current;
-
-		if (!isDragging.current) {
-			if (Math.abs(deltaX) >= 10) {
-				isDragging.current = true;
-				startTime.current = Date.now();
-				return _onSwipeStart.current();
-			}
-			return;
-		}
-
-		endX.current = endXX;
-
-		const deltaTime = Date.now() - startTime.current;
-		const { velocityX } = getVelocity({ deltaX, deltaTime });
-		const direction = getDirection({ deltaX });
-
-		return _onSwiping.current({
-			deltaX,
-			velocityX,
-			direction,
-		});
-	}, []);
-
-	const end = React.useCallback(() => {
-		isStarted.current = false;
-
-		if (!isDragging.current) return;
+	const finishSwipe = useCallback(({ cancelled = false } = {}) => {
+		if (pointerId.current === null) return;
 
 		const deltaX = endX.current - startX.current;
-		const deltaTime = Date.now() - startTime.current;
-		const { velocityX } = getVelocity({ deltaX, deltaTime });
-		const direction = getDirection({ deltaX });
+		const elapsed = Math.max(Date.now() - startTime.current, 1);
+		const velocityX = Math.abs(deltaX) / elapsed;
+		const didDrag = isDragging.current;
 
+		pointerId.current = null;
 		startX.current = 0;
+		startY.current = 0;
 		endX.current = 0;
 		startTime.current = 0;
 		isDragging.current = false;
+		gestureAxis.current = null;
+		suppressClick.current = didDrag;
 
-		return _onSwipeEnd.current({
-			deltaX,
-			velocityX,
-			direction,
-		});
-	}, []);
-
-	const handleTouchStart = React.useCallback((event) => {
-		// console.log('touchstart');
-		const [touch] = event.changedTouches;
-		start({ x: touch.pageX });
-	}, []);
-
-	const handleTouchMove = React.useCallback(
-		(event) => {
-			// console.log('touchmove');
-			if (isDragging.current) {
-				event.preventDefault();
-			}
-			const [touch] = event.changedTouches;
-			move({ x: touch.pageX });
-		},
-		[move]
-	);
-
-	const handleTouchEnd = React.useCallback(
-		(event) => {
-			const [touch] = event.changedTouches;
-			end({ x: touch.pageX });
-		},
-		[end]
-	);
-
-	React.useEffect(() => {
-		const element = setRef;
-		document.addEventListener("mousemove", () => {
-			console.log("mousemove");
-		});
-		document.addEventListener("mouseup", () => {
-			console.log("mouseup");
-		});
-		document.addEventListener("touchmove", handleTouchMove, {
-			passive: false,
-		});
-		document.addEventListener("touchend", handleTouchEnd);
-
-		if (element.current) {
-			element.current.addEventListener("mousedown", () => {
-				console.log("mousedown");
+		if (didDrag) {
+			callbacksRef.current.onSwipeEnd({
+				cancelled,
+				deltaX,
+				velocityX,
+				direction: deltaX < 0 ? "left" : "right",
 			});
-			element.current.addEventListener("touchstart", handleTouchStart);
 		}
-		return () => {
-			document.removeEventListener("mousemove", () => {});
-			document.removeEventListener("mouseup", () => {});
-			document.removeEventListener("touchmove", () => {});
-			document.removeEventListener("touchend", () => {});
+	}, []);
 
-			if (element.current) {
-				element.current.removeEventListener("mousedown", () => {});
-				element.current.removeEventListener("touchstart", () => {});
+	const handlePointerDown = useCallback((event) => {
+		if (!event.isPrimary || event.button > 0) return;
+
+		pointerId.current = event.pointerId;
+		startX.current = event.clientX;
+		startY.current = event.clientY;
+		endX.current = event.clientX;
+		startTime.current = Date.now();
+		gestureAxis.current = "pending";
+		if (event.currentTarget.setPointerCapture) {
+			event.currentTarget.setPointerCapture(event.pointerId);
+		}
+	}, []);
+
+	const handlePointerMove = useCallback((event) => {
+		if (event.pointerId !== pointerId.current) return;
+
+		endX.current = event.clientX;
+		const deltaX = endX.current - startX.current;
+		const deltaY = event.clientY - startY.current;
+
+		if (gestureAxis.current === "pending") {
+			if (
+				Math.max(Math.abs(deltaX), Math.abs(deltaY)) < dragStartThreshold
+			) {
+				return;
 			}
-		};
-	}, [handleTouchStart, handleTouchMove, handleTouchEnd]);
+			gestureAxis.current =
+				Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
+		}
 
-	return <StyledSwipeable ref={setRef}>{props.children}</StyledSwipeable>;
+		if (gestureAxis.current !== "horizontal") return;
+
+		if (!isDragging.current) {
+			isDragging.current = true;
+			callbacksRef.current.onSwipeStart();
+		}
+
+		const elapsed = Math.max(Date.now() - startTime.current, 1);
+		callbacksRef.current.onSwiping({
+			deltaX,
+			velocityX: Math.abs(deltaX) / elapsed,
+			direction: deltaX < 0 ? "left" : "right",
+		});
+	}, []);
+
+	const handlePointerUp = useCallback(
+		(event) => {
+			if (event.pointerId !== pointerId.current) return;
+
+			// The last pointermove can be skipped during a fast fling, so the
+			// release coordinate must be recorded before deriving the swipe.
+			endX.current = event.clientX;
+			finishSwipe();
+		},
+		[finishSwipe]
+	);
+
+	const handlePointerCancel = useCallback(
+		(event) => {
+			if (event.pointerId === pointerId.current) {
+				finishSwipe({ cancelled: true });
+			}
+		},
+		[finishSwipe]
+	);
+
+	const handleClickCapture = useCallback((event) => {
+		if (!suppressClick.current) return;
+
+		event.preventDefault();
+		event.stopPropagation();
+		suppressClick.current = false;
+	}, []);
+
+	useEffect(() => finishSwipe, [finishSwipe]);
+
+	return (
+		<StyledSwipeable
+			aria-label="Image carousel"
+			onClickCapture={handleClickCapture}
+			onPointerCancel={handlePointerCancel}
+			onPointerDown={handlePointerDown}
+			onPointerMove={handlePointerMove}
+			onPointerUp={handlePointerUp}
+		>
+			{children}
+		</StyledSwipeable>
+	);
 }
 
 function HorizontalScroll() {
-	const listingWidth =
-		itemAmount * itemWidth +
-		(itemAmount - 1) * showcaseItemGap +
-		showcaseContainerGap * 2;
+	const [isSwiping, setIsSwiping] = useState(false);
+	const [hasTransition, setHasTransition] = useState(false);
+	const [transitionDuration, setTransitionDuration] = useState(
+		showcaseSwipeTransitionSeconds
+	);
+	const [deltaX, setDeltaX] = useState(0);
+	const [videoList, setVideoList] = useState(initialVideos);
+	const [selectedVideo, setSelectedVideo] = useState(initialVideos[0].name);
+	const frameId = useRef(null);
+	const transitionTimer = useRef(null);
+	const pendingDirection = useRef(null);
 
-	const [isSwiping, setIsSwiping] = React.useState(false);
-	const [isTransitionStart, setIsTransitionStart] = React.useState(false);
-	const [deltaX, setDeltaX] = React.useState(0);
-	// const [direction, setDirection] = React.useState("");
-	const direction = React.useRef("");
-	const frameId = React.useRef(null);
-	const transitionTimer = React.useRef(null);
-
-	const [activeIndex, setActiveIndex] = React.useState(2);
-
-	// const [videoList, setVideoList] = React.useState(fakeApi.video);
-	const [videoList, setVideoList] = React.useState([
-		{ name: "Hunter" },
-		{ name: "Bonnie" },
-		{ name: "Stoner" },
-		{ name: "Rossi" },
-		{ name: "Brown" },
-	]);
-
-	const frameHandler = (data) => {
-		setDeltaX(data);
-	};
-
-	const handleSwipeStart = () => {
-		setIsSwiping(true);
-	};
-
-	const handleSwiping = ({ deltaX: _deltaX, direction: _direction }) => {
-		console.log(_deltaX);
+	const scheduleDeltaX = useCallback((nextDeltaX) => {
 		cancelAnimationFrame(frameId.current);
+		frameId.current = requestAnimationFrame(() => setDeltaX(nextDeltaX));
+	}, []);
 
-		frameId.current = requestAnimationFrame(() => frameHandler(_deltaX));
+	const commitPendingRotation = useCallback(() => {
+		const direction = pendingDirection.current;
+		if (!direction) return false;
 
-		if (_direction !== direction.current) {
-			return (direction.current = _direction);
-		}
-	};
-
-	const handleSwipeEnd = ({ deltaX, velocityX }) => {
-		// const activeIndex = 0;
-		// const nextIndex = direction === 'DIRECTION_LEFT' ? activeIndex + 1 : activeIndex - 1;
-		// const shouldChangeIndex = Math.abs(deltaX) >= (itemWidth + showcaseItemGap) / 2 || velocityX > 1;
-		const shouldChangeIndex =
-			Math.abs(deltaX) >= (itemWidth + showcaseItemGap) / 2;
-		setIsSwiping(false);
-		setIsTransitionStart(true);
-
-		if (shouldChangeIndex) {
-			const newDeltaX =
-				(direction.current === "DIRECTION_LEFT" ? -1 : 1) *
-				(itemWidth + showcaseItemGap);
-
-			frameId.current = requestAnimationFrame(() =>
-				frameHandler(newDeltaX)
-			);
-			transitionTimer.current = setTimeout(() => {
-				console.log("change");
-				setActiveIndex((prevState) => {
-					console.log(prevState);
-					return direction.current === "DIRECTION_LEFT"
-						? prevState + 1
-						: prevState - 1;
-				});
-				setVideoList((prevState) => {
-					const newState = [...prevState];
-					if (direction.current === "DIRECTION_LEFT") {
-						newState.push(newState.shift());
-					} else {
-						newState.unshift(newState.pop());
-					}
-					return newState;
-				});
-			}, showcaseSwipeTransitionSeconds * 1000);
-		} else {
-			frameId.current = requestAnimationFrame(() => frameHandler(0));
-			transitionTimer.current = setTimeout(() => {
-				setIsTransitionStart(false);
-			}, showcaseSwipeTransitionSeconds * 1000);
-		}
-	};
-
-	React.useEffect(() => {
-		setIsTransitionStart(false);
+		cancelAnimationFrame(frameId.current);
+		clearTimeout(transitionTimer.current);
+		pendingDirection.current = null;
+		setVideoList((videos) =>
+			direction === "left"
+				? [...videos.slice(1), videos[0]]
+				: [videos[videos.length - 1], ...videos.slice(0, -1)]
+		);
 		setDeltaX(0);
-	}, [activeIndex]);
+		setHasTransition(false);
+		return true;
+	}, []);
+
+	const clearPendingTransition = useCallback(() => {
+		cancelAnimationFrame(frameId.current);
+		clearTimeout(transitionTimer.current);
+		pendingDirection.current = null;
+	}, []);
+
+	const handleSwipeStart = useCallback(() => {
+		commitPendingRotation();
+		cancelAnimationFrame(frameId.current);
+		clearTimeout(transitionTimer.current);
+		setHasTransition(false);
+		setTransitionDuration(showcaseSwipeTransitionSeconds);
+		setIsSwiping(true);
+	}, [commitPendingRotation]);
+
+	const handleSwiping = useCallback(
+		({ deltaX }) => {
+			scheduleDeltaX(clamp(deltaX, -itemStep, itemStep));
+		},
+		[scheduleDeltaX]
+	);
+
+	const handleSwipeEnd = useCallback(
+		({ cancelled = false, deltaX, direction, velocityX }) => {
+			if (cancelled) {
+				setIsSwiping(false);
+				setHasTransition(true);
+				setTransitionDuration(0.18);
+				scheduleDeltaX(0);
+				transitionTimer.current = setTimeout(
+					() => setHasTransition(false),
+					180
+				);
+				return;
+			}
+
+			const shouldChangeItem =
+				Math.abs(deltaX) >= itemStep * 0.25 ||
+				velocityX >= flingVelocityThreshold;
+			const snapDuration = shouldChangeItem
+				? Math.max(0.18, 0.42 - velocityX * 0.18)
+				: 0.24;
+			setIsSwiping(false);
+			setHasTransition(true);
+			setTransitionDuration(snapDuration);
+
+			if (!shouldChangeItem) {
+				scheduleDeltaX(0);
+				transitionTimer.current = setTimeout(
+					() => setHasTransition(false),
+					snapDuration * 1000
+				);
+				return;
+			}
+
+			const nextDeltaX = direction === "left" ? -itemStep : itemStep;
+			scheduleDeltaX(nextDeltaX);
+			pendingDirection.current = direction;
+			transitionTimer.current = setTimeout(
+				commitPendingRotation,
+				snapDuration * 1000
+			);
+		},
+		[commitPendingRotation, scheduleDeltaX]
+	);
+
+	useEffect(() => clearPendingTransition, [clearPendingTransition]);
 
 	return (
-		<StyledHomeShowcaseList>
-			<SwipeableWrapper>
-				<Swipeable
-					onSwipeStart={handleSwipeStart}
-					onSwiping={handleSwiping}
-					onSwipeEnd={handleSwipeEnd}
+		<StyledHomeShowcaseList data-swiping={isSwiping}>
+			<Swipeable
+				onSwipeEnd={handleSwipeEnd}
+				onSwipeStart={handleSwipeStart}
+				onSwiping={handleSwiping}
+			>
+				<ShowcaseList
+					deltaX={deltaX}
+					hasTransition={hasTransition}
+					transitionDuration={transitionDuration}
 				>
-					<ShowcaseList
-						listingWidth={listingWidth}
-						hasTransition={isTransitionStart}
-						deltaX={deltaX}
-					>
-						{videoList.map((e, i) => (
-							<VideoElement key={i} value={e} />
-						))}
-					</ShowcaseList>
-				</Swipeable>
-			</SwipeableWrapper>
+					{videoList.map((video) => (
+						<VideoElement
+							isSelected={selectedVideo === video.name}
+							key={video.name}
+							onSelect={setSelectedVideo}
+							value={video}
+						/>
+					))}
+				</ShowcaseList>
+			</Swipeable>
 		</StyledHomeShowcaseList>
 	);
 }
@@ -291,47 +305,65 @@ function HorizontalScroll() {
 const StyledHomeShowcaseList = styled.div`
 	position: relative;
 	margin-bottom: 16px;
-`;
-
-const SwipeableWrapper = styled.div`
 	overflow: hidden;
 `;
 
 const StyledSwipeable = styled.div`
 	width: 100%;
+	touch-action: pan-y;
+	user-select: none;
 `;
 
-const showcaseSwipeTransitionSeconds = 0.6;
-const itemAmount = 5;
-// const itemWidth = 320;
-const itemWidth = 275;
-const showcaseItemGap = 12;
-const showcaseContainerGap = 12;
-
 const ShowcaseList = styled.div.attrs(
-	({ deltaX = 0, listingWidth, hasTransition = false }) => ({
-		style: {
-			transform: `translate3d(calc((100vw - ${listingWidth}px) * 0.5 + ${deltaX}px), 0px, 0px)`,
-			transition: `transform ${
-				hasTransition ? `${showcaseSwipeTransitionSeconds}s` : "0s"
-			}`,
-			width: `${listingWidth}px`,
-		},
+	({ deltaX = 0, hasTransition = false, transitionDuration }) => ({
+	style: {
+		transform: `translate3d(calc((100vw - ${listingWidth}px) * 0.5 + ${deltaX}px), 0, 0)`,
+		transition: `transform ${hasTransition ? transitionDuration : 0}s cubic-bezier(0.22, 0.61, 0.36, 1)`,
+		width: `${listingWidth}px`,
+	},
 	})
 )`
 	display: flex;
 	flex-wrap: nowrap;
 	will-change: transform;
-	::before {
+
+	&::before,
+	&::after {
 		content: "";
 		width: ${showcaseContainerGap / 2}px;
 		flex: none;
 	}
-	::after {
-		content: "";
-		width: ${showcaseContainerGap / 2}px;
-		flex: none;
+`;
+
+const VideoCard = styled.button`
+	width: 320px;
+	height: 200px;
+	padding: 0;
+	margin: 0 6px;
+	flex: none;
+	overflow: hidden;
+	border: 3px solid ${({ selected }) => (selected ? "#2563eb" : "transparent")};
+	border-radius: 10px;
+	background: transparent;
+	cursor: pointer;
+	transition: border-color 150ms ease, transform 150ms ease;
+
+	&:focus-visible {
+		outline: 3px solid #93c5fd;
+		outline-offset: 3px;
 	}
+
+	&:hover {
+		transform: translateY(-2px);
+	}
+`;
+
+const CardImage = styled.img`
+	display: block;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	pointer-events: none;
 `;
 
 export default HorizontalScroll;
